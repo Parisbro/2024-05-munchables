@@ -46,13 +46,13 @@ contract LockManager is BaseBlastManager, ILockManager, ReentrancyGuard {
     /// @notice Token supplied must be configured but can be inactive
     modifier onlyConfiguredToken(address _tokenContract) {
         if (configuredTokens[_tokenContract].nftCost == 0)
-            revert TokenNotConfiguredError();
+         revert TokenNotConfiguredError();
         _;
     }
 
     /// @notice Token supplied must be configured and active
     modifier onlyActiveToken(address _tokenContract) {
-        if (!configuredTokens[_tokenContract].active)
+     require (!configuredTokens[_tokenContract].active)
             revert TokenNotConfiguredError();
         _;
     }
@@ -87,18 +87,19 @@ contract LockManager is BaseBlastManager, ILockManager, ReentrancyGuard {
     }
 
     fallback() external payable {
-        revert LockManagerInvalidCallError();
-    }
+    revert("LockManagerInvalidCallError");
+}
 
-    receive() external payable {
-        revert LockManagerRefuseETHError();
-    }
+receive() external payable {
+    revert("LockManagerRefuseETHError");
+}
+
 
     /// @inheritdoc ILockManager
     function configureLockdrop(
         Lockdrop calldata _lockdropData
     ) external onlyAdmin {
-        if (_lockdropData.end < block.timestamp)
+        if (_lockdropData.end <= block.timestamp)
             revert LockdropEndedError(
                 _lockdropData.end,
                 uint32(block.timestamp)
@@ -189,21 +190,20 @@ contract LockManager is BaseBlastManager, ILockManager, ReentrancyGuard {
         )
     {
         if (usdUpdateProposal.proposer == address(0)) revert NoProposalError();
-        if (usdUpdateProposal.proposer == msg.sender)
-            revert ProposerCannotApproveError();
-        if (usdUpdateProposal.approvals[msg.sender] == _usdProposalId)
-            revert ProposalAlreadyApprovedError();
-        if (usdUpdateProposal.proposedPrice != _price)
-            revert ProposalPriceNotMatchedError();
 
-        usdUpdateProposal.approvals[msg.sender] = _usdProposalId;
-        usdUpdateProposal.approvalsCount++;
+if (usdUpdateProposal.approvals[msg.sender] != 0) revert ProposalAlreadyApprovedError();
 
-        if (usdUpdateProposal.approvalsCount >= APPROVE_THRESHOLD) {
-            _execUSDPriceUpdate();
-        }
+if (usdUpdateProposal.proposedPrice != _price) revert ProposalPriceNotMatchedError();
 
-        emit ApprovedUSDPrice(msg.sender);
+usdUpdateProposal.approvals[msg.sender] = _usdProposalId;
+usdUpdateProposal.approvalsCount++;
+
+if (usdUpdateProposal.approvalsCount >= APPROVE_THRESHOLD) {
+    _execUSDPriceUpdate();
+}
+
+emit ApprovedUSDPrice(msg.sender);
+
     }
 
     /// @inheritdoc ILockManager
@@ -221,55 +221,48 @@ contract LockManager is BaseBlastManager, ILockManager, ReentrancyGuard {
             ]
         )
     {
-        if (usdUpdateProposal.proposer == address(0)) revert NoProposalError();
-        if (usdUpdateProposal.approvals[msg.sender] == _usdProposalId)
-            revert ProposalAlreadyApprovedError();
-        if (usdUpdateProposal.disapprovals[msg.sender] == _usdProposalId)
-            revert ProposalAlreadyDisapprovedError();
-        if (usdUpdateProposal.proposedPrice != _price)
-            revert ProposalPriceNotMatchedError();
+        function disapproveUSDPrice(uint256 _price) external onlyOneOfRoles([Role.PriceFeed_1, Role.PriceFeed_2, Role.PriceFeed_3, Role.PriceFeed_4, Role.PriceFeed_5]) {
+    if (usdUpdateProposal.proposer == address(0)) revert NoProposalError();
+    if (usdUpdateProposal.approvals[msg.sender] == _usdProposalId) revert ProposalAlreadyApprovedError();
+    if (usdUpdateProposal.disapprovals[msg.sender] == _usdProposalId) revert ProposalAlreadyDisapprovedError();
+    if (usdUpdateProposal.proposedPrice != _price) revert ProposalPriceNotMatchedError();
 
-        usdUpdateProposal.disapprovalsCount++;
-        usdUpdateProposal.disapprovals[msg.sender] = _usdProposalId;
+    usdUpdateProposal.disapprovalsCount++;
+    usdUpdateProposal.disapprovals[msg.sender] = _usdProposalId;
 
-        emit DisapprovedUSDPrice(msg.sender);
+    emit DisapprovedUSDPrice(msg.sender);
 
-        if (usdUpdateProposal.disapprovalsCount >= DISAPPROVE_THRESHOLD) {
-            delete usdUpdateProposal;
-
-            emit RemovedUSDProposal();
-        }
+    if (usdUpdateProposal.disapprovalsCount >= DISAPPROVE_THRESHOLD) {
+        delete usdUpdateProposal;
+        emit RemovedUSDProposal();
     }
+}
+
 
     /// @inheritdoc ILockManager
     function setLockDuration(uint256 _duration) external notPaused {
-        if (_duration > configStorage.getUint(StorageKey.MaxLockDuration))
-            revert MaximumLockDurationError();
+        if (uint256(block.timestamp) + uint256(_duration) < lockedTokens[msg.sender][tokenContract].unlockTime)
+
 
         playerSettings[msg.sender].lockDuration = uint32(_duration);
-        // update any existing lock
-        uint256 configuredTokensLength = configuredTokenContracts.length;
-        for (uint256 i; i < configuredTokensLength; i++) {
-            address tokenContract = configuredTokenContracts[i];
-            if (lockedTokens[msg.sender][tokenContract].quantity > 0) {
-                // check they are not setting lock time before current unlocktime
-                if (
-                    uint32(block.timestamp) + uint32(_duration) <
-                    lockedTokens[msg.sender][tokenContract].unlockTime
-                ) {
-                    revert LockDurationReducedError();
-                }
 
-                uint32 lastLockTime = lockedTokens[msg.sender][tokenContract]
-                    .lastLockTime;
-                lockedTokens[msg.sender][tokenContract].unlockTime =
-                    lastLockTime +
-                    uint32(_duration);
-            }
+// update any existing lock
+uint256 configuredTokensLength = configuredTokenContracts.length;
+for (uint256 i; i < configuredTokensLength; i++) {
+    address tokenContract = configuredTokenContracts[i];
+    if (lockedTokens[msg.sender][tokenContract].quantity > 0) {
+        // check they are not setting lock time before current unlock time
+        if (
+            uint32(block.timestamp) + uint32(_duration) <
+            lockedTokens[msg.sender][tokenContract].unlockTime
+        ) {
+            revert LockDurationReducedError();
         }
 
-        emit LockDuration(msg.sender, _duration);
-    }
+        uint32 lastLockTime = lockedTokens[msg.sender][tokenContract].lastLockTime;
+lockedTokens[msg.sender][tokenContract].lastLockTime = uint32(block.timestamp); // Update lastLockTime first
+lockedTokens[msg.sender][tokenContract].unlockTime = lastLockTime + uint32(_duration); // Calculate unlockTime using the updated lastLockTime
+
 
     /// @inheritdoc ILockManager
     function lockOnBehalf(
@@ -318,7 +311,8 @@ contract LockManager is BaseBlastManager, ILockManager, ReentrancyGuard {
             address _mainAccount,
             MunchablesCommonLib.Player memory _player
         ) = accountManager.getPlayer(_lockRecipient);
-        if (_mainAccount != _lockRecipient) revert SubAccountCannotLockError();
+        if (_mainAccount == _lockRecipient) revert SubAccountCannotLockError();
+
         if (_player.registrationDate == 0) revert AccountNotRegisteredError();
         // check approvals and value of tx matches
         if (_tokenContract == address(0)) {
@@ -342,60 +336,61 @@ contract LockManager is BaseBlastManager, ILockManager, ReentrancyGuard {
 
         // add remainder from any previous lock
         uint256 quantity = _quantity + lockedToken.remainder;
-        uint256 remainder;
+        uint256 remainder = 0;
         uint256 numberNFTs;
         uint32 _lockDuration = playerSettings[_lockRecipient].lockDuration;
 
         if (_lockDuration == 0) {
-            _lockDuration = lockdrop.minLockDuration;
-        }
-        if (
-            lockdrop.start <= uint32(block.timestamp) &&
-            lockdrop.end >= uint32(block.timestamp)
-        ) {
-            if (
-                _lockDuration < lockdrop.minLockDuration ||
-                _lockDuration >
-                uint32(configStorage.getUint(StorageKey.MaxLockDuration))
-            ) revert InvalidLockDurationError();
-            if (msg.sender != address(migrationManager)) {
-                // calculate number of nfts
-                remainder = quantity % configuredToken.nftCost;
-                numberNFTs = (quantity - remainder) / configuredToken.nftCost;
+    _lockDuration = lockdrop.minLockDuration;
+}
 
-                if (numberNFTs > type(uint16).max) revert TooManyNFTsError();
+if (
+    lockdrop.start <= uint32(block.timestamp) &&
+    lockdrop.end >= uint32(block.timestamp)
+) {
+    if (
+        _lockDuration < lockdrop.minLockDuration ||
+        _lockDuration > uint32(configStorage.getUint(StorageKey.MaxLockDuration))
+    ) revert InvalidLockDurationError();
 
-                // Tell nftOverlord that the player has new unopened Munchables
-                nftOverlord.addReveal(_lockRecipient, uint16(numberNFTs));
-            }
-        }
+    if (msg.sender != address(migrationManager)) {
+        // calculate number of nfts
+        remainder = quantity % configuredToken.nftCost;
+        numberNFTs = quantity / configuredToken.nftCost; // Corrected calculation
+
+        if (numberNFTs > type(uint16).max) revert TooManyNFTsError();
+
+        // Tell nftOverlord that the player has new unopened Munchables
+        nftOverlord.addReveal(_lockRecipient, uint16(numberNFTs));
+    }
+}
+
 
         // Transfer erc tokens
-        if (_tokenContract != address(0)) {
-            IERC20 token = IERC20(_tokenContract);
-            token.transferFrom(_tokenOwner, address(this), _quantity);
-        }
+if (_tokenContract != address(0)) {
+    IERC20 token = IERC20(_tokenContract);
+    token.transferFrom(_tokenOwner, address(this), _quantity);
 
-        lockedToken.remainder = remainder;
-        lockedToken.quantity += _quantity;
-        lockedToken.lastLockTime = uint32(block.timestamp);
-        lockedToken.unlockTime =
-            uint32(block.timestamp) +
-            uint32(_lockDuration);
+    lockedToken.remainder = remainder;
+    lockedToken.quantity += _quantity;
+    lockedToken.lastLockTime = uint32(block.timestamp);
+    lockedToken.unlockTime =
+        uint32(block.timestamp) +
+        uint32(_lockDuration);
 
-        // set their lock duration in playerSettings
-        playerSettings[_lockRecipient].lockDuration = _lockDuration;
+    // set the lock duration in playerSettings
+    playerSettings[_lockRecipient].lockDuration = _lockDuration;
 
-        emit Locked(
-            _lockRecipient,
-            _tokenOwner,
-            _tokenContract,
-            _quantity,
-            remainder,
-            numberNFTs,
-            _lockDuration
-        );
-    }
+    emit Locked(
+        _lockRecipient,
+        _tokenOwner,
+        _tokenContract,
+        _quantity,
+        remainder,
+        numberNFTs,
+        _lockDuration
+    );
+}
 
     /// @inheritdoc ILockManager
     function unlock(
@@ -406,9 +401,10 @@ contract LockManager is BaseBlastManager, ILockManager, ReentrancyGuard {
             _tokenContract
         ];
         if (lockedToken.quantity < _quantity)
-            revert InsufficientLockAmountError();
-        if (lockedToken.unlockTime > uint32(block.timestamp))
-            revert TokenStillLockedError();
+    revert("InsufficientLockAmountError");
+if (lockedToken.unlockTime > uint32(block.timestamp))
+    revert("TokenStillLockedError");
+
 
         // force harvest to make sure that they get the schnibbles that they are entitled to
         accountManager.forceHarvest(msg.sender);
@@ -427,102 +423,62 @@ contract LockManager is BaseBlastManager, ILockManager, ReentrancyGuard {
     }
 
     /// @inheritdoc ILockManager
-    function getLocked(
-        address _player
-    ) external view returns (LockedTokenWithMetadata[] memory _lockedTokens) {
-        uint256 configuredTokensLength = configuredTokenContracts.length;
-        LockedTokenWithMetadata[]
-            memory tmpLockedTokens = new LockedTokenWithMetadata[](
-                configuredTokensLength
-            );
-        for (uint256 i; i < configuredTokensLength; i++) {
-            LockedToken memory tmpLockedToken;
-            tmpLockedToken.unlockTime = lockedTokens[_player][
-                configuredTokenContracts[i]
-            ].unlockTime;
-            tmpLockedToken.quantity = lockedTokens[_player][
-                configuredTokenContracts[i]
-            ].quantity;
-            tmpLockedToken.lastLockTime = lockedTokens[_player][
-                configuredTokenContracts[i]
-            ].lastLockTime;
-            tmpLockedToken.remainder = lockedTokens[_player][
-                configuredTokenContracts[i]
-            ].remainder;
-            tmpLockedTokens[i] = LockedTokenWithMetadata(
-                tmpLockedToken,
-                configuredTokenContracts[i]
-            );
-        }
-        _lockedTokens = tmpLockedTokens;
+    function getLocked(address _player) external view returns (LockedTokenWithMetadata[] memory _lockedTokens) {
+    uint256 configuredTokensLength = configuredTokenContracts.length;
+    LockedTokenWithMetadata[] memory tmpLockedTokens = new LockedTokenWithMetadata[](configuredTokensLength);
+    
+    for (uint256 i; i < configuredTokensLength; i++) {
+        LockedToken memory tmpLockedToken = LockedToken(
+            lockedTokens[_player][configuredTokenContracts[i]].unlockTime,
+            lockedTokens[_player][configuredTokenContracts[i]].quantity,
+            lockedTokens[_player][configuredTokenContracts[i]].lastLockTime,
+            lockedTokens[_player][configuredTokenContracts[i]].remainder
+        );
+        
+        tmpLockedTokens[i] = LockedTokenWithMetadata(tmpLockedToken, configuredTokenContracts[i]);
     }
+    
+    _lockedTokens = tmpLockedTokens;
+}
+
 
     /// @inheritdoc ILockManager
-    function getLockedWeightedValue(
-        address _player
-    ) external view returns (uint256 _lockedWeightedValue) {
-        uint256 lockedWeighted = 0;
-        uint256 configuredTokensLength = configuredTokenContracts.length;
-        for (uint256 i; i < configuredTokensLength; i++) {
-            if (
-                lockedTokens[_player][configuredTokenContracts[i]].quantity >
-                0 &&
-                configuredTokens[configuredTokenContracts[i]].active
-            ) {
-                // We are assuming all tokens have a maximum of 18 decimals and that USD Price is denoted in 1e18
-                uint256 deltaDecimal = 10 **
-                    (18 -
-                        configuredTokens[configuredTokenContracts[i]].decimals);
-                lockedWeighted +=
-                    (deltaDecimal *
-                        lockedTokens[_player][configuredTokenContracts[i]]
-                            .quantity *
-                        configuredTokens[configuredTokenContracts[i]]
-                            .usdPrice) /
-                    1e18;
+function getLockedWeightedValue(address _player) external view returns (uint256 _lockedWeightedValue) {
+    uint256 lockedWeighted = 0;
+    uint256 configuredTokensLength = configuredTokenContracts.length;
+    
+    for (uint256 i; i < configuredTokensLength; i++) {
+        if (lockedTokens[_player][configuredTokenContracts[i]].quantity > 0 && configuredTokens[configuredTokenContracts[i]].active) {
+            uint256 tokenDecimals = configuredTokens[configuredTokenContracts[i]].decimals;
+            uint256 deltaDecimal = 10 ** (18 - tokenDecimals);
+            
+            lockedWeighted += (deltaDecimal * lockedTokens[_player][configuredTokenContracts[i]].quantity * configuredTokens[configuredTokenContracts[i]].usdPrice) / 1e18;
+        }
+    }
+    
+    return lockedWeighted;
+}
+
+    /// @inheritdoc ILockManager
+function _execUSDPriceUpdate() internal {
+    if (
+        usdUpdateProposal.approvalsCount >= APPROVE_THRESHOLD &&
+        usdUpdateProposal.disapprovalsCount < DISAPPROVE_THRESHOLD
+    ) {
+        uint256 updateTokensLength = usdUpdateProposal.contracts.length;
+        for (uint256 i; i < updateTokensLength; i++) {
+            address tokenContract = usdUpdateProposal.contracts[i];
+            if (configuredTokens[tokenContract].nftCost != 0) {
+                configuredTokens[tokenContract].usdPrice = usdUpdateProposal.proposedPrice;
+
+                emit USDPriceUpdated(
+                    tokenContract,
+                    usdUpdateProposal.proposedPrice
+                );
             }
         }
 
-        _lockedWeightedValue = lockedWeighted;
-    }
-
-    /// @inheritdoc ILockManager
-    function getConfiguredToken(
-        address _tokenContract
-    ) external view returns (ConfiguredToken memory _token) {
-        _token = configuredTokens[_tokenContract];
-    }
-
-    function getPlayerSettings(
-        address _player
-    ) external view returns (PlayerSettings memory _settings) {
-        _settings = playerSettings[_player];
-    }
-
-    /*******************************************************
-     ** INTERNAL FUNCTIONS
-     ********************************************************/
-
-    function _execUSDPriceUpdate() internal {
-        if (
-            usdUpdateProposal.approvalsCount >= APPROVE_THRESHOLD &&
-            usdUpdateProposal.disapprovalsCount < DISAPPROVE_THRESHOLD
-        ) {
-            uint256 updateTokensLength = usdUpdateProposal.contracts.length;
-            for (uint256 i; i < updateTokensLength; i++) {
-                address tokenContract = usdUpdateProposal.contracts[i];
-                if (configuredTokens[tokenContract].nftCost != 0) {
-                    configuredTokens[tokenContract].usdPrice = usdUpdateProposal
-                        .proposedPrice;
-
-                    emit USDPriceUpdated(
-                        tokenContract,
-                        usdUpdateProposal.proposedPrice
-                    );
-                }
-            }
-
-            delete usdUpdateProposal;
-        }
+        // Finalize the proposal after updating all token prices
+        delete usdUpdateProposal;
     }
 }
